@@ -1,0 +1,56 @@
+@base = http://localhost:5195
+
+### Get all movies
+GET {{base}}/api/movies
+Accept: application/json
+
+###
+
+### Get single movie
+GET {{base}}/api/movies/1
+Accept: application/json
+
+###
+
+### Add a movie
+POST {{base}}/api/movies
+Content-Type: application/json
+
+{
+  "title": "The Matrix",
+  "genre": "Sci-Fi",
+  "year": 1999,
+  "description": "A hacker discovers the world is a simulation and joins a rebellion to fight the machines."
+}
+
+###
+
+### Edit a movie
+PUT {{base}}/api/movies/1
+Content-Type: application/json
+
+{
+  "title": "Inception",
+  "genre": "Sci-Fi",
+  "year": 2010,
+  "description": "Updated description here."
+}
+
+###
+
+### Delete a movie
+DELETE {{base}}/api/movies/6
+Accept: application/json
+
+###
+
+### Login
+POST {{base}}/api/login
+Content-Type: application/json
+
+{
+  "username": "admin",
+  "password": "password"
+}
+
+###
