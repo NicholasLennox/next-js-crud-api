@@ -39,7 +39,7 @@ npm install --save-dev vitest @vitejs/plugin-react jsdom @testing-library/react 
 This is the full list - nothing hidden, nothing to add later. Here is what each one does:
 
 | Package | What it does |
-|||
+|---|---|
 | `vitest` | The test runner |
 | `@vitejs/plugin-react` | Lets Vitest understand React and JSX |
 | `jsdom` | Fakes a browser environment so components can render |
