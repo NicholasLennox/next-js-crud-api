@@ -1,6 +1,10 @@
+import { requireAuth } from '@/lib/auth'
 import { addMovie } from '@/modules/movies/actions'
 
-export default function AddMoviePage() {
+export default async function AddMoviePage() {
+
+  await requireAuth()
+
   return (
     <div className="px-32">
       <h1 className="text-3xl font-bold mb-6">Add Movie</h1>

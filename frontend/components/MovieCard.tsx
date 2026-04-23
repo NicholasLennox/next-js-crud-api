@@ -2,7 +2,7 @@ import Link from 'next/link'
 import { MovieSummary } from '@/services/movies'
 import DeleteButton from './DeleteButton'
 
-export default function MovieCard({ movie }: { movie: MovieSummary }) {
+export default function MovieCard({ movie, isAdmin }: { movie: MovieSummary, isAdmin: boolean }) {
   return (
     <div className="border border-gray-200 rounded-xl p-5 bg-white flex flex-col gap-2">
       <div className="flex items-center justify-between">
@@ -16,12 +16,14 @@ export default function MovieCard({ movie }: { movie: MovieSummary }) {
         <Link href={`/movies/${movie.id}`} className="text-sm text-blue-600 hover:underline">
           View details →
         </Link>
-        <div className="flex items-center gap-3">
-          <Link href={`/movies/edit/${movie.id}`} className="text-sm text-gray-500 hover:text-gray-700">
-            Edit
-          </Link>
-          <DeleteButton id={movie.id} />
-        </div>
+        {isAdmin && (
+          <div className="flex items-center gap-3">
+            <Link href={`/movies/edit/${movie.id}`} className="text-sm text-gray-500 hover:text-gray-700">
+              Edit
+            </Link>
+            <DeleteButton id={movie.id} />
+          </div>
+        )}
       </div>
     </div>
   )

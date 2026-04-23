@@ -1,9 +1,13 @@
 import { getMovie } from '@/services/movies'
 import { updateMovie } from '@/modules/movies/actions'
 import { notFound } from 'next/navigation'
+import { requireAuth } from '@/lib/auth'
 
 export default async function EditMoviePage({ params }: { params: Promise<{ id: string }> }) {
   const { id } = await params
+  
+  await requireAuth()
+
   const movie = await getMovie(Number(id))
 
   if (!movie) notFound()

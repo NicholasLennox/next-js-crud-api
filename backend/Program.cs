@@ -1,8 +1,9 @@
-// Program.cs
-// Minimal API - in-memory movie data
-// Auth middleware is stubbed out, ready to enable Friday
-
 using Microsoft.AspNetCore.Mvc;
+using Microsoft.AspNetCore.Authentication.JwtBearer;
+using Microsoft.IdentityModel.Tokens;
+using System.Text;
+using System.Security.Claims;
+using System.IdentityModel.Tokens.Jwt;
 
 var builder = WebApplication.CreateBuilder(args);
 
@@ -19,12 +20,29 @@ builder.Services.AddCors(options =>
     });
 });
 
+var jwtKey = "super-secret-key-for-classroom-demo-only";
+
+builder.Services.AddAuthentication(JwtBearerDefaults.AuthenticationScheme)
+    .AddJwtBearer(options =>
+    {
+        options.TokenValidationParameters = new TokenValidationParameters
+        {
+            ValidateIssuer = false,
+            ValidateAudience = false,
+            ValidateLifetime = true,
+            ValidateIssuerSigningKey = true,
+            IssuerSigningKey = new SymmetricSecurityKey(Encoding.UTF8.GetBytes(jwtKey))
+        };
+    });
+
+builder.Services.AddAuthorization();
+
 var movies = new List<Movie>
 {
     new Movie { Id = 1, Title = "Inception", Genre = "Sci-Fi", Year = 2010, Description = "A thief who steals corporate secrets through dream-sharing technology is given the task of planting an idea." },
     new Movie { Id = 2, Title = "The Dark Knight", Genre = "Action", Year = 2008, Description = "When the menace known as the Joker wreaks havoc on Gotham, Batman must accept one of the greatest psychological tests." },
     new Movie { Id = 3, Title = "Interstellar", Genre = "Sci-Fi", Year = 2014, Description = "A team of explorers travel through a wormhole in space in an attempt to ensure humanity's survival." },
-    new Movie { Id = 4, Title = "The Godfather", Genre = "Crime", Year = 1972, Description = "The aging patriarch of an organized crime dynasty transfers control of his empire to his reluctant son." },
+    new Movie { Id = 4, Title = "The Godfather", Genre = "Crime", Year = 1972, Description = "The aging patriarch of an organized crime dynasty transfers control of his empire to his relocant son." },
     new Movie { Id = 5, Title = "Pulp Fiction", Genre = "Crime", Year = 1994, Description = "The lives of two mob hitmen, a boxer, a gangster and his wife intertwine in four tales of violence and redemption." },
     new Movie { Id = 6, Title = "Parasite", Genre = "Thriller", Year = 2019, Description = "Greed and class discrimination threaten the newly formed symbiotic relationship between the wealthy Park family and the destitute Kim clan." },
     new Movie { Id = 7, Title = "The Grand Budapest Hotel", Genre = "Comedy", Year = 2014, Description = "A writer encounters the owner of an ageing hotel who tells him of his early years as a lobby boy." },
@@ -42,10 +60,8 @@ var app = builder.Build();
 app.UseSwagger();
 app.UseSwaggerUI();
 app.UseCors();
-
-// --- stub: drop JWT middleware here Friday ---
-// app.UseAuthentication();
-// app.UseAuthorization();
+app.UseAuthentication();
+app.UseAuthorization();
 
 // Public endpoints
 app.MapGet("/api/movies", () => Results.Ok(movies));
@@ -56,7 +72,7 @@ app.MapGet("/api/movies/{id}", (int id) =>
     return movie is null ? Results.NotFound() : Results.Ok(movie);
 });
 
-// Protected endpoints - Friday you add [Authorize] and uncomment middleware
+// Protected endpoints - require admin role
 app.MapPost("/api/movies", ([FromBody] MovieRequest request) =>
 {
     var movie = new Movie
@@ -69,7 +85,7 @@ app.MapPost("/api/movies", ([FromBody] MovieRequest request) =>
     };
     movies.Add(movie);
     return Results.Created($"/api/movies/{movie.Id}", movie);
-});
+}).RequireAuthorization(p => p.RequireRole("admin"));
 
 app.MapPut("/api/movies/{id}", (int id, [FromBody] MovieRequest request) =>
 {
@@ -82,7 +98,7 @@ app.MapPut("/api/movies/{id}", (int id, [FromBody] MovieRequest request) =>
     movie.Description = request.Description;
 
     return Results.Ok(movie);
-});
+}).RequireAuthorization(p => p.RequireRole("admin"));
 
 app.MapDelete("/api/movies/{id}", (int id) =>
 {
@@ -91,22 +107,34 @@ app.MapDelete("/api/movies/{id}", (int id) =>
 
     movies.Remove(movie);
     return Results.NoContent();
-});
+}).RequireAuthorization(p => p.RequireRole("admin"));
 
-// Auth stub - Friday
+// Login
 app.MapPost("/api/login", ([FromBody] LoginRequest request) =>
 {
-    // swap this out for real validation Friday
-    if (request.Username == "admin" && request.Password == "password")
+    if (request.Username != "admin" || request.Password != "password")
+        return Results.Unauthorized();
+
+    var claims = new[]
     {
-        return Results.Ok(new { token = "stub-token" });
-    }
-    return Results.Unauthorized();
+        new Claim(ClaimTypes.Name, request.Username),
+        new Claim(ClaimTypes.Role, "admin")
+    };
+
+    var key = new SymmetricSecurityKey(Encoding.UTF8.GetBytes(jwtKey));
+    var creds = new SigningCredentials(key, SecurityAlgorithms.HmacSha256);
+
+    var token = new JwtSecurityToken(
+        claims: claims,
+        expires: DateTime.UtcNow.AddHours(8),
+        signingCredentials: creds
+    );
+
+    return Results.Ok(new { token = new JwtSecurityTokenHandler().WriteToken(token) });
 });
 
 app.Run();
 
-// Models
 record Movie
 {
     public int Id { get; set; }

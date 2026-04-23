@@ -1,20 +1,33 @@
 @base = http://localhost:5195
+@token = eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJodHRwOi8vc2NoZW1hcy54bWxzb2FwLm9yZy93cy8yMDA1LzA1L2lkZW50aXR5L2NsYWltcy9uYW1lIjoiYWRtaW4iLCJodHRwOi8vc2NoZW1hcy5taWNyb3NvZnQuY29tL3dzLzIwMDgvMDYvaWRlbnRpdHkvY2xhaW1zL3JvbGUiOiJhZG1pbiIsImV4cCI6MTc3Njk3NjU5OH0.1hWtI8z43DrIZ4vUHlEmKenmJQGEYs-jJSkJ5p3WpRo
 
-### Get all movies
+### Login - run this first, copy the token into @token above
+POST {{base}}/api/login
+Content-Type: application/json
+
+{
+  "username": "admin",
+  "password": "password"
+}
+
+###
+
+### Get all movies - public
 GET {{base}}/api/movies
 Accept: application/json
 
 ###
 
-### Get single movie
+### Get single movie - public
 GET {{base}}/api/movies/1
 Accept: application/json
 
 ###
 
-### Add a movie
+### Add a movie - requires token
 POST {{base}}/api/movies
 Content-Type: application/json
+Authorization: Bearer {{token}}
 
 {
   "title": "The Matrix",
@@ -25,9 +38,10 @@ Content-Type: application/json
 
 ###
 
-### Edit a movie
+### Edit a movie - requires token
 PUT {{base}}/api/movies/1
 Content-Type: application/json
+Authorization: Bearer {{token}}
 
 {
   "title": "Inception",
@@ -38,19 +52,21 @@ Content-Type: application/json
 
 ###
 
-### Delete a movie
+### Delete a movie - requires token
 DELETE {{base}}/api/movies/6
-Accept: application/json
+Authorization: Bearer {{token}}
 
 ###
 
-### Login
-POST {{base}}/api/login
+### Attempt mutation without token - should return 401
+POST {{base}}/api/movies
 Content-Type: application/json
 
 {
-  "username": "admin",
-  "password": "password"
+  "title": "Should fail",
+  "genre": "Test",
+  "year": 2024,
+  "description": "This should return 401."
 }
 
 ###

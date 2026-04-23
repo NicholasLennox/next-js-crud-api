@@ -1,128 +1,171 @@
-# Next.js - Data, Mutations, and the Server/Client Boundary
+# Next.js - Authentication and Route Protection
 
-(Run the backend dotnet app first)
+## What this session adds
 
-## Part 1 - Connecting to a real API
+The app has been open all week. Anyone could add, edit, or delete movies. Today that changes - a login form, a protected backend, and a frontend that reflects who is logged in.
 
-### What changes when data comes from outside
 
-In the first session the service read from a local JSON file. The file lived in the project, the import was instant, nothing could go wrong.
 
-A real API is different. The request goes over the network. It can be slow. It can fail. The data arrives asynchronously - you ask for it, and at some point later it arrives.
+## Login
 
-The service is still the right place to handle this. What changes is how the functions are written.
+Start with the form. It is a server action, same pattern as adding or editing a movie:
 
-```ts
-// before - synchronous, local file
-export function getMovies(): MovieSummary[] {
-  return movies
+```tsx
+// app/login/page.tsx
+import { login } from '@/modules/auth/actions'
+
+export default function LoginPage() {
+  return (
+    <form action={login}>
+      <input name="username" required />
+      <input name="password" type="password" required />
+      <button type="submit">Login</button>
+    </form>
+  )
 }
-
-// after - asynchronous, real API
-export async function getMovies(): Promise<MovieSummary[]> {
-  const res = await fetch(`${API_URL}/api/movies`)
-  if (!res.ok) throw new Error('Failed to fetch movies')
-  return res.json()
-}
 ```
 
-The function is now `async` and returns a `Promise`. Everything else - the interface, the return type, the name - stays the same. The page that calls it changes by one word:
+The action handles everything - calling the API, storing the token, redirecting on success:
 
 ```ts
-// before
-const movies = getMovies()
-
-// after
-const movies = await getMovies()
-```
-
-That is the entire change from the page's perspective. It does not know or care that the data now comes from a network request instead of a file. This is why the service layer exists - not ceremony, but protection. When things change underneath, the pages stay the same.
-
-
-
-### Environment variables
-
-The API URL does not belong in your code. It changes between environments - your laptop, a staging server, production. Hard-coding it means editing source files every time you move the app somewhere new.
-
-Create a `lib/constants.ts`:
-
-```ts
-export const API_URL = process.env.NEXT_PUBLIC_API_URL ?? 'http://localhost:5195'
-```
-
-And a `.env.local` file at the root of the project:
-
-```bash
-NEXT_PUBLIC_API_URL=http://localhost:5195
-```
-
-Two things worth knowing about this:
-
-`NEXT_PUBLIC_` is a Next convention. Variables with this prefix are available in the browser as well as on the server. Variables without it are server-only - never sent to the client. Sensitive values like API keys should never have the prefix.
-
-The `??` is a fallback. If the environment variable is not set, the URL defaults to localhost. This means the app works in development without the `.env.local` file existing.
-
-This is in the assignment criteria. Get into the habit now.
-
-
-
-### Error handling in the service
-
-When a fetch fails, `res.ok` is false. If you ignore that and call `res.json()` anyway, you get confusing errors further down the line. Check it early and throw something meaningful:
-
-```ts
-if (!res.ok) throw new Error('Failed to fetch movies')
-```
-
-Throwing in a server component triggers the nearest `error.tsx`. That file catches the error and shows the user something useful instead of a broken page. You saw `error.tsx` in the first session - this is what actually triggers it in practice.
-
-
-
-### Loading and error pages in context
-
-Next reserves two filenames in any route folder:
-
-- `loading.tsx` - renders immediately while the page is waiting for data
-- `error.tsx` - renders when something throws
-
-Both scope to the folder they live in. `app/movies/loading.tsx` covers `/movies` and everything nested inside it. `app/loading.tsx` covers the whole app.
-
-For the assignment, these are required on the home page. They are not difficult to write - but you need to understand what triggers them. `loading.tsx` fires automatically when a server component is waiting on an async operation. `error.tsx` fires when something throws. The throw in your service is what connects the two.
-
-
-
-## Part 2 - Mutations and the server/client boundary
-
-### The problem with writing data
-
-Reading data in Next is clean. Server components call the service, data is there before the page leaves the server, the browser receives finished HTML.
-
-Writing data is a different problem. The user fills in a form and clicks submit. Something needs to happen - a POST, a PUT, a DELETE. In your React apps you handled this in the browser: `useState` for the form fields, `handleChange` on every input, `fetch` in the submit handler. That works. But there is a server sitting right there in Next. You can use it.
-
-### Server actions
-
-You already know components are server by default. A server component calls the service, the service runs on the server, no directive needed - the context is inherited.
-
-Functions triggered by the browser are different. A form submission, a button click - by the time the user does that, execution has moved to the client. A function triggered from the browser runs in the browser, regardless of where it was defined.
-
-This matters because mutations need to happen on the server. A function that calls your API, redirects the user, and invalidates the cache should not run in the browser.
-
-`'use server'` is how you tell Next: even though this function is triggered from the browser, run it on the server. A function marked this way is called a server action. You pass it directly to a form's `action` attribute - no `onSubmit`, no `fetch` from the client:
-
-```ts
+// modules/auth/actions.ts
 'use server'
 
+import { cookies } from 'next/headers'
+import { redirect } from 'next/navigation'
+import { API_URL } from '@/lib/constants'
+
+export async function login(formData: FormData) {
+  const username = formData.get('username')
+  const password = formData.get('password')
+
+  const res = await fetch(`${API_URL}/api/login`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ username, password }),
+  })
+
+  if (!res.ok) throw new Error('Invalid credentials')
+
+  const { token } = await res.json()
+
+  const cookieStore = await cookies()
+  cookieStore.set('token', token, { httpOnly: true, path: '/' })
+  cookieStore.set('username', username as string, { httpOnly: true, path: '/' })
+
+  redirect('/admin')
+}
+```
+
+Two things to notice. The API call happens on the server - the token never passes through the browser. And the token is stored in a cookie, not localStorage.
+
+
+
+## Why cookies, not localStorage
+
+You may have stored tokens in localStorage before. That works in a fully client-rendered app where everything happens in the browser.
+
+Next has a server. Server components run before the browser receives anything. localStorage is a browser API - the server cannot read it. If the token lives in localStorage, your server components have no way to attach it to API requests or check if a user is logged in before rendering.
+
+Cookies are different. The browser sends them automatically with every request. The server can read them before rendering anything. This is not a new idea - forms, submissions, and cookies are how the web worked before JavaScript took over client-side rendering. We are coming back to something that was not broken in the first place.
+
+```ts
+import { cookies } from 'next/headers'
+
+const cookieStore = await cookies()
+const token = cookieStore.get('token')?.value
+```
+
+This works anywhere the server runs - server components, server actions, layouts.
+
+
+
+## httpOnly
+
+Both cookies are marked `httpOnly`:
+
+```ts
+cookieStore.set('token', token, { httpOnly: true, path: '/' })
+```
+
+This flag tells the browser not to expose the cookie to JavaScript. `document.cookie` cannot see it. A script injected into the page cannot steal it.
+
+The server is unaffected - `httpOnly` only blocks browser-side JavaScript. `cookies()` from `next/headers` reads it normally.
+
+For tokens, always set `httpOnly`. There is no reason the browser needs direct access to it.
+
+
+
+## Protecting routes
+
+There are two ways to stop access to a route. Which one you reach for depends on the situation.
+
+### requireAuth - for individual pages
+
+Extract the token check into a helper:
+
+```ts
+// lib/auth.ts
+import { cookies } from 'next/headers'
+import { redirect } from 'next/navigation'
+
+export async function requireAuth() {
+  const cookieStore = await cookies()
+  const token = cookieStore.get('token')?.value
+  if (!token) redirect('/login')
+  return token
+}
+```
+
+Then call it at the top of any page that needs protection:
+
+```tsx
+export default async function AddMoviePage() {
+  await requireAuth()
+  // rest of the page
+}
+```
+
+If there is no token, the user is redirected before the page renders. `requireAuth` also returns the token - useful when you need to attach it to an API request.
+
+### Layout protection - for a whole section
+
+You have had one layout so far - `app/layout.tsx` at the root, wrapping the entire app. A layout can live inside any folder and it works the same way: it wraps everything nested inside that folder automatically.
+
+That means protection logic in a layout covers every route in that folder without touching any of them individually:
+
+```tsx
+// app/admin/layout.tsx
+export default async function AdminLayout({ children }: { children: React.ReactNode }) {
+  const cookieStore = await cookies()
+  const token = cookieStore.get('token')
+
+  if (!token) redirect('/login')
+
+  return <div>{children}</div>
+}
+```
+
+Every route nested under `/admin` is protected by this one check. Add a new admin page and it is already covered.
+
+Think of it as drawing a boundary around a section of the app. `requireAuth` is a lock on a single door. The layout is a lock on the entrance to an entire floor.
+
+
+
+## Attaching the token to API requests
+
+The backend now requires a token on mutation endpoints. The actions need to send it:
+
+```ts
 export async function addMovie(formData: FormData) {
-  const body = {
-    title: formData.get('title'),
-    genre: formData.get('genre'),
-    year: Number(formData.get('year')),
-    description: formData.get('description'),
-  }
+  const token = await requireAuth()
 
   const res = await fetch(`${API_URL}/api/movies`, {
     method: 'POST',
-    headers: { 'Content-Type': 'application/json' },
+    headers: {
+      'Content-Type': 'application/json',
+      'Authorization': `Bearer ${token}`
+    },
     body: JSON.stringify(body),
   })
 
@@ -133,189 +176,97 @@ export async function addMovie(formData: FormData) {
 }
 ```
 
-```tsx
-<form action={addMovie}>
-  <input name="title" />
-  <button type="submit">Add</button>
-</form>
-```
-
-The `name` attributes on the inputs are the bridge between the HTML and the function. `formData.get('title')` reads whatever the user typed into `<input name="title" />`.
-
-The service never needs `'use server'` because it is only ever called from server components. Actions need it because they are called from forms.
-
-### `revalidatePath` - why it exists
-
-Next caches page renders. When `/movies` loads, Next keeps a copy of the rendered result. The next request serves that copy instead of re-running the page - faster, less work for the server.
-
-The problem is mutations. You add a movie, the cache still holds the old list. Next does not automatically know something changed.
-
-`revalidatePath('/movies')` tells Next to throw away the cached version of that route. The next request re-runs the page fresh, and the new movie shows up.
-
-```ts
-revalidatePath('/movies')  // invalidate the cache
-redirect('/movies')        // send the user there
-```
-
-Without `revalidatePath` the redirect would work but the page would show stale data. Both lines are needed.
-
-### Where actions live
-
-Actions live in a `modules/` folder, co-located with the feature they belong to:
-
-```
-modules/
-  movies/
-    actions.ts
-services/
-  movies.ts
-```
-
-`services/` is for reading. `actions.ts` is for writing. This is a deliberate separation - a pattern you will see in professional Next codebases. Keeping reads and writes in different places makes it easier to find things as the app grows, and it keeps the service layer focused on one job.
-
-As more features are added the pattern scales cleanly:
-
-```
-modules/
-  movies/
-    actions.ts
-  auth/
-    actions.ts
-```
+`requireAuth` does two things here: it redirects unauthenticated users before the fetch fires, and it returns the token to attach to the request. The unauthenticated case never reaches the API.
 
 
 
-### `'use server'` - file level vs function level
+## Conditional UI
 
-`'use server'` at the top of a file marks every function in that file as a server action:
-
-```ts
-'use server'
-
-export async function addMovie(formData: FormData) { ... }
-export async function deleteMovie(formData: FormData) { ... }
-export async function updateMovie(formData: FormData) { ... }
-```
-
-`'use server'` inside a single function marks only that function:
-
-```ts
-const handleSubmit = async (formData: FormData) => {
-  'use server'
-  // only this function runs on the server
-}
-```
-
-You will mostly use the file-level version. The inline version exists for cases where you need to close over a value from the component - but there is usually a cleaner way. Passing data through a hidden input keeps the action self-contained and consistent with how the other actions work:
+The navbar and movie cards reflect who is logged in. The check happens on the server - read the cookie, render accordingly:
 
 ```tsx
-<form action={updateMovie}>
-  <input type="hidden" name="id" value={movie.id} />
+// app/layout.tsx
+const cookieStore = await cookies()
+const username = cookieStore.get('username')?.value
+
+{username ? (
+  <div className="flex items-center gap-4 ml-auto">
+    <span>{username}</span>
+    <form action={logout}>
+      <button type="submit">Logout</button>
+    </form>
+  </div>
+) : (
+  <Link href="/login">Login</Link>
+)}
 ```
 
-```ts
-export async function updateMovie(formData: FormData) {
-  const id = Number(formData.get('id'))
-  // read everything from formData, including the hidden field
-}
-```
-
-
-
-### Error handling in actions
-
-The same principle from the service applies here. Check the response, throw if it is not ok:
-
-```ts
-if (!res.ok) throw new Error('Failed to add movie')
-```
-
-Throwing in an action triggers the nearest `error.tsx`. The difference from the service is that `error.tsx` for a form page needs to let the user try again - which means it needs interactivity.
+The movie card receives `isAdmin` as a prop from the page, which reads the cookie and passes it down:
 
 ```tsx
-'use client'
-
-export default function Error({ reset }: { reset: () => void }) {
+export default function MovieCard({ movie, isAdmin }: { movie: MovieSummary, isAdmin: boolean }) {
   return (
     <div>
-      <p>Something went wrong.</p>
-      <button onClick={reset}>Try again</button>
+      <div className="flex items-center justify-between mt-auto">
+        <Link href={`/movies/${movie.id}`}>View details →</Link>
+        {isAdmin && (
+          <div className="flex items-center gap-3">
+            <Link href={`/movies/edit/${movie.id}`}>Edit</Link>
+            <DeleteButton id={movie.id} />
+          </div>
+        )}
+      </div>
     </div>
   )
 }
 ```
 
-`error.tsx` must be a client component because of the `reset` prop. Only plain data - strings, numbers, arrays - can cross the boundary between server and client. Functions cannot. `reset` is a function that Next passes in to retry the failed action. Because it is a function, the component that receives it has to live on the client side. `'use client'` is what makes that possible.
-
-`reset` retries the action. It does not navigate away. The user stays on the form and tries again.
 
 
+## Logout
 
-### The server/client boundary in components
-
-`MovieCard` is a server component. It renders on the server, produces HTML, and that is the end of its job. But it has a delete button - and delete needs `window.confirm`, which is a browser API. The server does not have `window`.
-
-The answer is not to make the whole card a client component. It is to extract only the piece that needs the browser:
-
-```
-components/
-  MovieCard.tsx       ← server component
-  DeleteButton.tsx    ← "use client"
-```
-
-```tsx
-'use client'
-
-export default function DeleteButton({ id }: { id: number }) {
-  async function handleDelete() {
-    const confirmed = window.confirm('Are you sure?')
-    if (!confirmed) return
-    await deleteMovie(id)
-  }
-
-  return <button onClick={handleDelete}>Delete</button>
+```ts
+export async function logout() {
+  const cookieStore = await cookies()
+  cookieStore.delete('token')
+  cookieStore.delete('username')
+  redirect('/login')
 }
 ```
 
-`MovieCard` imports `DeleteButton`. The card stays on the server. Only the button crosses the boundary. This is the principle in action: push `'use client'` as far down the tree as you can. The more that stays on the server, the less JavaScript ships to the browser.
-
-
-
-### Edit - reading before writing
-
-Edit is the most complete example of how everything fits together.
-
-The page is a server component. It fetches the existing movie first, then renders a form pre-populated with that data:
-
 ```tsx
-export default async function EditMoviePage({ params }) {
-  const { id } = await params
-  const movie = await getMovie(Number(id))
-
-  if (!movie) notFound()
-
-  return (
-    <form action={updateMovie}>
-      <input type="hidden" name="id" value={movie.id} />
-      <input name="title" defaultValue={movie.title} />
-      <input name="genre" defaultValue={movie.genre} />
-    </form>
-  )
-}
+<form action={logout}>
+  <button type="submit">Logout</button>
+</form>
 ```
 
-`defaultValue` sets the initial value of an input without React controlling it. The server provides the starting point, the browser owns the field from there. No `useState`, no controlled inputs - the server does the work it is good at, the browser does the work it is good at.
+
+
+## Frontend protection and backend security are not the same thing
+
+By the end of this session the app has two layers of protection and it is worth being clear about what each one does.
+
+The frontend hides things. Buttons disappear when you are not logged in. Routes redirect when there is no token. This is good user experience.
+
+It is not security.
+
+The frontend lives in the browser. Anyone with Postman, curl, or a script can call your API directly - no browser involved, no frontend in the way. Every mutation endpoint is one HTTP request away from anyone who knows the URL.
+
+The backend is the actual security. When .NET requires a valid token on the mutation endpoints, it does not matter how the request arrives. No token, no access. The request is rejected before it touches any data.
+
+The frontend says *you should not be here*. The backend says *you cannot be here*.
+
+Both layers are always needed. Frontend protection alone is theatre. Backend protection alone works but gives a poor experience. Together they do two different jobs well.
 
 
 
-### The full picture
+## The full picture
 
 | Concern | Where it lives | Why |
 |---|---|---|
-| Reading data | `services/` | Called directly from server components |
-| Writing data | `modules/[feature]/actions.ts` | Co-located with the feature, triggered by forms |
-| Shared UI | `components/` | Reused across pages |
-| Config and constants | `lib/constants.ts` | One place to change when things move |
-| Environment secrets | `.env.local` | Never in source code |
-
-The service layer abstracts where data comes from. The action layer abstracts how data gets written. Pages and components sit on top of both and stay focused on what they are actually for: rendering and responding to the user.
+| Login logic | `modules/auth/actions.ts` | Server action, sets cookies, redirects |
+| Auth helper | `lib/auth.ts` | One place for the token check, returns token |
+| Section protection | `app/admin/layout.tsx` | Covers all nested routes automatically |
+| Page protection | `requireAuth()` | Individual pages outside a protected section |
+| Conditional UI | `MovieCard`, `layout.tsx` | Reflects auth state, does not enforce it |
+| Actual security | .NET `RequireAuthorization` | Rejects requests without a valid token |
