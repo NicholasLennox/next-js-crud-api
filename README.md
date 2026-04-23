@@ -97,31 +97,17 @@ For the assignment, these are required on the home page. They are not difficult 
 
 Reading data in Next is clean. Server components call the service, data is there before the page leaves the server, the browser receives finished HTML.
 
-Writing data is a different problem. The user fills in a form and clicks submit. Something needs to happen - a POST, a PUT, a DELETE. In your React apps you handled this in the browser: `useState` for the form fields, `handleChange` on every input, `fetch` in the submit handler, `useEffect` to show loading state.
-
-That works. But all of it runs in the browser by default. In Next, there is a server sitting right there. You can use it.
-
-
-
-### Functions run in the browser by default
-
-Before anything else, this needs to be clear.
-
-Components in Next are server by default. You already know this - no `useState`, no `useEffect`, renders on the server, sends HTML.
-
-Functions are different. A function defined in a component, or in a plain `.ts` file, runs in the browser by default. The server component rule does not apply to functions automatically.
-
-This matters because it means a function that does a `fetch` and a `redirect` - things that should happen on the server - will try to run in the browser unless you tell Next otherwise.
-
-`'use server'` is that instruction.
-
-
+Writing data is a different problem. The user fills in a form and clicks submit. Something needs to happen - a POST, a PUT, a DELETE. In your React apps you handled this in the browser: `useState` for the form fields, `handleChange` on every input, `fetch` in the submit handler. That works. But there is a server sitting right there in Next. You can use it.
 
 ### Server actions
 
-A server action is a function marked with `'use server'`. When Next sees this, it ensures the function runs on the server - even when it is triggered by something in the browser, like a form submission.
+You already know components are server by default. A server component calls the service, the service runs on the server, no directive needed - the context is inherited.
 
-You pass it directly to a form's `action` attribute. When the form submits, Next calls the function with the form's data. No `onSubmit`, no `fetch` from the client, no API endpoint needed on your end:
+Functions triggered by the browser are different. A form submission, a button click - by the time the user does that, execution has moved to the client. A function triggered from the browser runs in the browser, regardless of where it was defined.
+
+This matters because mutations need to happen on the server. A function that calls your API, redirects the user, and invalidates the cache should not run in the browser.
+
+`'use server'` is how you tell Next: even though this function is triggered from the browser, run it on the server. A function marked this way is called a server action. You pass it directly to a form's `action` attribute - no `onSubmit`, no `fetch` from the client:
 
 ```ts
 'use server'
@@ -156,7 +142,7 @@ export async function addMovie(formData: FormData) {
 
 The `name` attributes on the inputs are the bridge between the HTML and the function. `formData.get('title')` reads whatever the user typed into `<input name="title" />`.
 
-
+The service never needs `'use server'` because it is only ever called from server components. Actions need it because they are called from forms.
 
 ### `revalidatePath` - why it exists
 
@@ -172,8 +158,6 @@ redirect('/movies')        // send the user there
 ```
 
 Without `revalidatePath` the redirect would work but the page would show stale data. Both lines are needed.
-
-
 
 ### Where actions live
 
