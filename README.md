@@ -1,272 +1,210 @@
-# Next.js - Authentication and Route Protection
+# Component Testing with Vitest
 
-## What this session adds
+## What component testing is
 
-The app has been open all week. Anyone could add, edit, or delete movies. Today that changes - a login form, a protected backend, and a frontend that reflects who is logged in.
+A component test asks one question: given these props, does the component show what it should?
+
+Not how it works internally. Not which functions it calls. Not what CSS classes it has. Just - does the right thing appear on screen when you give it the right input.
+
+This is the mindset shift that makes component testing useful. If you test implementation details - internal state, function calls, class names - your tests break every time you refactor, even when the component still works correctly. Test what the user sees and your tests stay honest. Refactor the internals freely, and as long as the output is the same, the tests pass.
+
+For `MovieCard` that means:
+- Given a movie, does the title appear?
+- Given a movie, does the genre appear?
+- Given `isAdmin: true`, do the edit controls appear?
+- Given `isAdmin: false`, do they not appear?
+
+Simple, readable, and directly connected to what the component actually does.
 
 
 
-## Login
+## Why Vitest, not Jest
 
-Start with the form. It is a server action, same pattern as adding or editing a movie:
+Jest is the most widely used JavaScript test runner. It also has a rough relationship with Next.js. Jest is a browser-focused tool and Next is a server-focused framework - they require significant configuration to work together. Mocking Next internals, resolving server-only imports, handling TypeScript - each one is a separate hurdle.
 
-```tsx
-// app/login/page.tsx
-import { login } from '@/modules/auth/actions'
+Vitest was built for the modern JavaScript ecosystem. It understands TypeScript natively, works with the same plugin system as Next, and requires a fraction of the setup. The Next.js docs recommend it. The experience is noticeably smoother.
 
-export default function LoginPage() {
-  return (
-    <form action={login}>
-      <input name="username" required />
-      <input name="password" type="password" required />
-      <button type="submit">Login</button>
-    </form>
-  )
-}
+For this project, Vitest is the right tool.
+
+
+
+## Setup
+
+### Packages
+
+```bash
+npm install --save-dev vitest @vitejs/plugin-react jsdom @testing-library/react @testing-library/jest-dom
 ```
 
-The action handles everything - calling the API, storing the token, redirecting on success:
+This is the full list - nothing hidden, nothing to add later. Here is what each one does:
+
+| Package | What it does |
+|||
+| `vitest` | The test runner |
+| `@vitejs/plugin-react` | Lets Vitest understand React and JSX |
+| `jsdom` | Fakes a browser environment so components can render |
+| `@testing-library/react` | Renders components and queries what is on screen |
+| `@testing-library/jest-dom` | Adds readable matchers like `toBeInTheDocument()` |
+
+### Config
+
+Create `vitest.config.ts` at the root of the project:
 
 ```ts
-// modules/auth/actions.ts
-'use server'
+import { defineConfig } from 'vitest/config'
+import react from '@vitejs/plugin-react'
+import path from 'path'
 
-import { cookies } from 'next/headers'
-import { redirect } from 'next/navigation'
-import { API_URL } from '@/lib/constants'
-
-export async function login(formData: FormData) {
-  const username = formData.get('username')
-  const password = formData.get('password')
-
-  const res = await fetch(`${API_URL}/api/login`, {
-    method: 'POST',
-    headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({ username, password }),
-  })
-
-  if (!res.ok) throw new Error('Invalid credentials')
-
-  const { token } = await res.json()
-
-  const cookieStore = await cookies()
-  cookieStore.set('token', token, { httpOnly: true, path: '/' })
-  cookieStore.set('username', username as string, { httpOnly: true, path: '/' })
-
-  redirect('/admin')
-}
-```
-
-Two things to notice. The API call happens on the server - the token never passes through the browser. And the token is stored in a cookie, not localStorage.
-
-
-
-## Why cookies, not localStorage
-
-You may have stored tokens in localStorage before. That works in a fully client-rendered app where everything happens in the browser.
-
-Next has a server. Server components run before the browser receives anything. localStorage is a browser API - the server cannot read it. If the token lives in localStorage, your server components have no way to attach it to API requests or check if a user is logged in before rendering.
-
-Cookies are different. The browser sends them automatically with every request. The server can read them before rendering anything. This is not a new idea - forms, submissions, and cookies are how the web worked before JavaScript took over client-side rendering. We are coming back to something that was not broken in the first place.
-
-```ts
-import { cookies } from 'next/headers'
-
-const cookieStore = await cookies()
-const token = cookieStore.get('token')?.value
-```
-
-This works anywhere the server runs - server components, server actions, layouts.
-
-
-
-## httpOnly
-
-Both cookies are marked `httpOnly`:
-
-```ts
-cookieStore.set('token', token, { httpOnly: true, path: '/' })
-```
-
-This flag tells the browser not to expose the cookie to JavaScript. `document.cookie` cannot see it. A script injected into the page cannot steal it.
-
-The server is unaffected - `httpOnly` only blocks browser-side JavaScript. `cookies()` from `next/headers` reads it normally.
-
-For tokens, always set `httpOnly`. There is no reason the browser needs direct access to it.
-
-
-
-## Protecting routes
-
-There are two ways to stop access to a route. Which one you reach for depends on the situation.
-
-### requireAuth - for individual pages
-
-Extract the token check into a helper:
-
-```ts
-// lib/auth.ts
-import { cookies } from 'next/headers'
-import { redirect } from 'next/navigation'
-
-export async function requireAuth() {
-  const cookieStore = await cookies()
-  const token = cookieStore.get('token')?.value
-  if (!token) redirect('/login')
-  return token
-}
-```
-
-Then call it at the top of any page that needs protection:
-
-```tsx
-export default async function AddMoviePage() {
-  await requireAuth()
-  // rest of the page
-}
-```
-
-If there is no token, the user is redirected before the page renders. `requireAuth` also returns the token - useful when you need to attach it to an API request.
-
-### Layout protection - for a whole section
-
-You have had one layout so far - `app/layout.tsx` at the root, wrapping the entire app. A layout can live inside any folder and it works the same way: it wraps everything nested inside that folder automatically.
-
-That means protection logic in a layout covers every route in that folder without touching any of them individually:
-
-```tsx
-// app/admin/layout.tsx
-export default async function AdminLayout({ children }: { children: React.ReactNode }) {
-  const cookieStore = await cookies()
-  const token = cookieStore.get('token')
-
-  if (!token) redirect('/login')
-
-  return <div>{children}</div>
-}
-```
-
-Every route nested under `/admin` is protected by this one check. Add a new admin page and it is already covered.
-
-Think of it as drawing a boundary around a section of the app. `requireAuth` is a lock on a single door. The layout is a lock on the entrance to an entire floor.
-
-
-
-## Attaching the token to API requests
-
-The backend now requires a token on mutation endpoints. The actions need to send it:
-
-```ts
-export async function addMovie(formData: FormData) {
-  const token = await requireAuth()
-
-  const res = await fetch(`${API_URL}/api/movies`, {
-    method: 'POST',
-    headers: {
-      'Content-Type': 'application/json',
-      'Authorization': `Bearer ${token}`
+export default defineConfig({
+  plugins: [react()],
+  test: {
+    environment: 'jsdom',
+    globals: true,
+    setupFiles: ['./vitest.setup.ts'],
+  },
+  resolve: {
+    alias: {
+      '@': path.resolve(__dirname, '.'),
     },
-    body: JSON.stringify(body),
-  })
-
-  if (!res.ok) throw new Error('Failed to add movie')
-
-  revalidatePath('/movies')
-  redirect('/movies')
-}
+  },
+})
 ```
 
-`requireAuth` does two things here: it redirects unauthenticated users before the fetch fires, and it returns the token to attach to the request. The unauthenticated case never reaches the API.
+Three things worth knowing:
 
+`environment: 'jsdom'` - tells Vitest to fake a browser. Without this React cannot render anything - there is no `document`, no `window`, no DOM.
 
+`globals: true` - makes `describe`, `it`, and `expect` available without importing them in every test file.
 
-## Conditional UI
+`alias` - tells Vitest what `@/` means. Your `tsconfig.json` already defines this for the app. Vitest needs its own copy.
 
-The navbar and movie cards reflect who is logged in. The check happens on the server - read the cookie, render accordingly:
+### Setup file
 
-```tsx
-// app/layout.tsx
-const cookieStore = await cookies()
-const username = cookieStore.get('username')?.value
-
-{username ? (
-  <div className="flex items-center gap-4 ml-auto">
-    <span>{username}</span>
-    <form action={logout}>
-      <button type="submit">Logout</button>
-    </form>
-  </div>
-) : (
-  <Link href="/login">Login</Link>
-)}
-```
-
-The movie card receives `isAdmin` as a prop from the page, which reads the cookie and passes it down:
-
-```tsx
-export default function MovieCard({ movie, isAdmin }: { movie: MovieSummary, isAdmin: boolean }) {
-  return (
-    <div>
-      <div className="flex items-center justify-between mt-auto">
-        <Link href={`/movies/${movie.id}`}>View details →</Link>
-        {isAdmin && (
-          <div className="flex items-center gap-3">
-            <Link href={`/movies/edit/${movie.id}`}>Edit</Link>
-            <DeleteButton id={movie.id} />
-          </div>
-        )}
-      </div>
-    </div>
-  )
-}
-```
-
-
-
-## Logout
+Create `vitest.setup.ts`:
 
 ```ts
-export async function logout() {
-  const cookieStore = await cookies()
-  cookieStore.delete('token')
-  cookieStore.delete('username')
-  redirect('/login')
+import '@testing-library/jest-dom'
+```
+
+This loads the extra matchers before every test runs. One line.
+
+### Test script
+
+Add to `package.json`:
+
+```json
+"test": "vitest",
+"test:watch": "vitest --watch"
+```
+
+`test:watch` reruns tests automatically when you save. Useful while writing tests.
+
+
+
+## Writing the tests
+
+Create a `__tests__` folder and add `MovieCard.test.tsx`:
+
+```tsx
+import { render, screen } from '@testing-library/react'
+import { describe, it, expect } from 'vitest'
+import MovieCard from '@/components/MovieCard'
+
+const mockMovie = {
+  id: 1,
+  title: 'Inception',
+  genre: 'Sci-Fi',
+  year: 2010,
+}
+
+describe('MovieCard', () => {
+  it('renders the movie title', () => {
+    render(<MovieCard movie={mockMovie} isAdmin={false} />)
+    expect(screen.getByText('Inception')).toBeInTheDocument()
+  })
+
+  it('renders the genre', () => {
+    render(<MovieCard movie={mockMovie} isAdmin={false} />)
+    expect(screen.getByText('Sci-Fi')).toBeInTheDocument()
+  })
+
+  it('shows edit and delete when isAdmin is true', () => {
+    render(<MovieCard movie={mockMovie} isAdmin={true} />)
+    expect(screen.getByText('Edit')).toBeInTheDocument()
+  })
+
+  it('hides edit and delete when isAdmin is false', () => {
+    render(<MovieCard movie={mockMovie} isAdmin={false} />)
+    expect(screen.queryByText('Edit')).not.toBeInTheDocument()
+  })
+
+  it('links to the correct movie page', () => {
+    render(<MovieCard movie={mockMovie} isAdmin={false} />)
+    const link = screen.getByText('View details →')
+    expect(link).toHaveAttribute('href', '/movies/1')
+  })
+})
+```
+
+
+
+## What each test does
+
+### The mock data
+
+```ts
+const mockMovie = {
+  id: 1,
+  title: 'Inception',
+  genre: 'Sci-Fi',
+  year: 2010,
 }
 ```
 
-```tsx
-<form action={logout}>
-  <button type="submit">Logout</button>
-</form>
+A plain object that satisfies the `MovieSummary` interface. No API, no database, no service call. The component gets what it needs to render and nothing else.
+
+### `render` and `screen`
+
+Every test follows the same shape. `render` mounts the component into the fake browser environment. `screen` gives you ways to query what is on screen - by text, by role, by attribute.
+
+### `getByText` vs `queryByText`
+
+`getByText` finds an element by its text content. If it is not there the test throws and fails immediately.
+
+`queryByText` does the same but returns `null` instead of throwing. Use this when you are asserting something is *not* there - otherwise `getByText` would throw before you even reach the `not.toBeInTheDocument()` check.
+
+### `toHaveAttribute`
+
+```ts
+expect(link).toHaveAttribute('href', '/movies/1')
+```
+
+Checks that an element has a specific attribute with a specific value. Useful for links, form inputs, aria labels - anywhere an attribute carries meaning.
+
+
+
+## Running the tests
+
+```bash
+npm test
+```
+
+All five passing looks like this:
+
+```
+✓ renders the movie title
+✓ renders the genre
+✓ shows edit and delete when isAdmin is true
+✓ hides edit and delete when isAdmin is false
+✓ links to the correct movie page
 ```
 
 
 
-## Frontend protection and backend security are not the same thing
+## The mindset
 
-By the end of this session the app has two layers of protection and it is worth being clear about what each one does.
+Test the output, not the internals.
 
-The frontend hides things. Buttons disappear when you are not logged in. Routes redirect when there is no token. This is good user experience.
+If `MovieCard` is refactored tomorrow - different class names, different internal structure, a new child component - these tests should still pass as long as the title still appears, the genre still appears, and the admin controls still show and hide correctly.
 
-It is not security.
-
-The frontend lives in the browser. Anyone with Postman, curl, or a script can call your API directly - no browser involved, no frontend in the way. Every mutation endpoint is one HTTP request away from anyone who knows the URL.
-
-The backend is the actual security. When .NET requires a valid token on the mutation endpoints, it does not matter how the request arrives. No token, no access. The request is rejected before it touches any data.
-
-The frontend says *you should not be here*. The backend says *you cannot be here*.
-
-Both layers are always needed. Frontend protection alone is theatre. Backend protection alone works but gives a poor experience. Together they do two different jobs well.
-
-
-
-## The full picture
-
-| Concern | Where it lives | Why |
-|---|---|---|
-| Login logic | `modules/auth/actions.ts` | Server action, sets cookies, redirects |
-| Auth helper | `lib/auth.ts` | One place for the token check, returns token |
-| Section protection | `app/admin/layout.tsx` | Covers all nested routes automatically |
-| Page protection | `requireAuth()` | Individual pages outside a protected section |
-| Conditional UI | `MovieCard`, `layout.tsx` | Reflects auth state, does not enforce it |
-| Actual security | .NET `RequireAuthorization` | Rejects requests without a valid token |
+The moment you test class names or internal function calls, you couple your tests to your implementation. Every refactor breaks tests that were never actually wrong. Tests should give you confidence to change things, not reasons to avoid it.
