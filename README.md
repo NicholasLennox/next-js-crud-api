@@ -20,11 +20,15 @@ Simple, readable, and directly connected to what the component actually does.
 
 ## Why Vitest, not Jest
 
-Jest is the most widely used JavaScript test runner. It also has a rough relationship with Next.js. Jest is a browser-focused tool and Next is a server-focused framework - they require significant configuration to work together. Mocking Next internals, resolving server-only imports, handling TypeScript - each one is a separate hurdle.
+Jest is the most widely used JavaScript test runner and works well for many projects.
+The friction with Next specifically comes from Next's own module system.
+Imports like `next/cache`, `next/navigation`, and `next/headers` are Next internals
+that Jest cannot resolve. You end up mocking Next's own packages just to run a basic
+test - noise that has nothing to do with what you are actually testing.
 
-Vitest was built for the modern JavaScript ecosystem. It understands TypeScript natively, works with the same plugin system as Next, and requires a fraction of the setup. The Next.js docs recommend it. The experience is noticeably smoother.
-
-For this project, Vitest is the right tool.
+Vitest uses Vite's module resolution under the hood - the same system Next is built on.
+It handles Next's imports without extra configuration. TypeScript works natively.
+The setup is smaller and the experience is cleaner.
 
 
 
